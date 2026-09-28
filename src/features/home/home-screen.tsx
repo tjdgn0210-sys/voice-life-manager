@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import type { Transaction } from '../../domain/transaction/transaction';
 import { useExpenses } from '../capture/expense-context';
 import { expenseStyles as styles } from '../capture/expense-styles';
-import { parseExpenseTextCommand } from '../../application/proposals/parse-expense-text-command';
+import { createCaptureParserInput, routeCaptureInput } from '../../application/proposals/capture-parser-router';
 import { ExpenseUndoFeedback } from './expense-undo-feedback';
 
 export function HomeScreen() {
@@ -36,7 +36,9 @@ export function HomeScreen() {
     setSubmitting(true);
     setCommandMessage(null);
     try {
-      const parsed = parseExpenseTextCommand(command, retryActionId.current ?? expenses.newActionId(), expenses.now());
+      const parsed = routeCaptureInput(createCaptureParserInput(
+        command, retryActionId.current ?? expenses.newActionId(), 'TEXT', expenses.now(),
+      ));
       if (parsed.status !== 'PARSED') {
         setCommandMessage(parsed.message);
         return;

@@ -26,6 +26,7 @@ function load(relative) {
 }
 
 const { parseExpenseTextCommand } = load('src/application/proposals/parse-expense-text-command.ts');
+const { createCaptureParserInput, routeCaptureInput } = load('src/application/proposals/capture-parser-router.ts');
 const now = '2026-09-28T10:15:30.000Z';
 let id = 0;
 const parsed = (text, amount, category, memo) => {
@@ -116,10 +117,11 @@ async function main() {
     // Exercise Home's actual submit callback twice before any render can update disabled state.
     const jsx = (type, props) => ({ type, props });
     let homeStateIndex = 0;
+    let homeCommand = '점심 7000원';
     const mockModules = {
       react: { useCallback: fn => fn, useRef: value => ({ current: value }), useState: value => {
         const index = homeStateIndex++;
-        return [index === 4 ? '점심 7000원' : typeof value === 'function' ? value() : value, () => {}];
+        return [index === 4 ? homeCommand : typeof value === 'function' ? value() : value, () => {}];
       } },
       'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
       'expo-router': { router: { push() {} }, useFocusEffect() {} },
@@ -128,7 +130,7 @@ async function main() {
       '../../domain/transaction/transaction': {},
       '../capture/expense-context': { useExpenses: () => expenses },
       '../capture/expense-styles': { expenseStyles: {} },
-      '../../application/proposals/parse-expense-text-command': { parseExpenseTextCommand },
+      '../../application/proposals/capture-parser-router': { createCaptureParserInput, routeCaptureInput },
       './expense-undo-feedback': { ExpenseUndoFeedback: 'ExpenseUndoFeedback' },
     };
     const homeFile = path.join(root, 'src/features/home/home-screen.tsx');
@@ -140,8 +142,6 @@ async function main() {
       assert(name in mockModules, `Unexpected Home import: ${name}`);
       return mockModules[name];
     }, homeModule, homeModule.exports);
-    const tree = homeModule.exports.HomeScreen();
-    const header = tree.props.children.props.ListHeaderComponent;
     function find(node, type) {
       if (!node || typeof node !== 'object') return null;
       if (node.type === type) return node;
@@ -151,7 +151,13 @@ async function main() {
       }
       return null;
     }
-    const submit = find(header, 'Pressable').props.onPress;
+    async function submitHomeCommand(text) {
+      homeCommand = text;
+      homeStateIndex = 0;
+      const tree = homeModule.exports.HomeScreen();
+      const header = tree.props.children.props.ListHeaderComponent;
+      await find(header, 'Pressable').props.onPress();
+    }
     // Check immediate double submission with a deferred save and stable one-action execution.
     const originalSave = expenses.save;
     let saves = 0;
@@ -161,12 +167,32 @@ async function main() {
       return originalSave(proposal);
     };
     // The first handler synchronously locks before the second rapid press.
+    homeStateIndex = 0;
+    const tree = homeModule.exports.HomeScreen();
+    const header = tree.props.children.props.ListHeaderComponent;
+    const submit = find(header, 'Pressable').props.onPress;
     await Promise.all([submit(), submit()]);
     await new Promise(resolve => setTimeout(resolve, 15));
     expenses.save = originalSave;
     assert.equal(saves, 1);
     assert.equal(db.prepare("SELECT count(*) AS count FROM transactions WHERE input_method='TEXT' AND deleted_at IS NULL").get().count, 1);
     console.log('PASS: Home text submit prevents repeated rapid submission before rerender.');
+
+    const persistedState = () => ({
+      tables: Object.fromEntries(
+        ['transactions', 'tasks', 'events', 'notes', 'reminders', 'action_logs']
+          .map(table => [table, db.prepare(`SELECT count(*) AS count FROM ${table}`).get().count]),
+      ),
+      schemaVersion: db.prepare('PRAGMA user_version').get().user_version,
+    });
+    const beforeRejectedCommands = persistedState();
+    for (const text of [
+      '오늘 점심 먹었어', '택시 탔어', '어제 친구랑 밥 먹고 내가 32000원 냈어',
+      '지난주 금요일에 친구 선물로 5만원 썼어', '내일 3시에 치과 예약',
+      '비트코인 가격 알려줘', '오늘 날씨 어때',
+    ]) await submitHomeCommand(text);
+    assert.deepEqual(persistedState(), beforeRejectedCommands);
+    console.log('PASS: clarification, AI_REQUIRED and unsupported Home inputs never reach save or mutate persisted tables.');
   } finally {
     db.close();
   }
