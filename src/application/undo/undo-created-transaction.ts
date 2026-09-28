@@ -8,7 +8,7 @@ export type UndoResult =
   | { status: 'UNAVAILABLE' | 'EXPIRED' | 'INELIGIBLE' | 'BUSY' | 'FAILED'; message: string };
 
 /** Consumes trusted session evidence from a committed creation, not arbitrary UI payloads.
- * Only unchanged MANUAL EXPENSE creation is supported. No physical deletion or Undo table.
+ * Only unchanged MANUAL/TEXT EXPENSE creation is supported. No physical deletion or Undo table.
  */
 export function createTransactionUndo(dependencies: TransactionExecutionDependencies & { nextActionId(): string }) {
   let busy = false;
@@ -43,7 +43,7 @@ export function createTransactionUndo(dependencies: TransactionExecutionDependen
         }
         const entity = await transactions.findById(evidence.affectedEntityId);
         if (!entity) return { status: 'UNAVAILABLE', message: '기록이 없거나 이미 취소되었습니다.' };
-        if (entity.type !== 'EXPENSE' || entity.inputMethod !== 'MANUAL' || entity.deletedAt !== null
+        if (entity.type !== 'EXPENSE' || !['MANUAL', 'TEXT'].includes(entity.inputMethod) || entity.deletedAt !== null
           || entity.createdAt !== evidence.createdAt || entity.updatedAt !== entity.createdAt) {
           return { status: 'INELIGIBLE', message: '기록이 변경되어 실행취소할 수 없습니다.' };
         }

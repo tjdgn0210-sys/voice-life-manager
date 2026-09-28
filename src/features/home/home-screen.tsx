@@ -1,10 +1,11 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { router, useFocusEffect } from 'expo-router';
-import { ActivityIndicator, FlatList, Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { Transaction } from '../../domain/transaction/transaction';
 import { useExpenses } from '../capture/expense-context';
 import { expenseStyles as styles } from '../capture/expense-styles';
+import { parseExpenseTextCommand } from '../../application/proposals/parse-expense-text-command';
 import { ExpenseUndoFeedback } from './expense-undo-feedback';
 
 export function HomeScreen() {
@@ -13,6 +14,11 @@ export function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [command, setCommand] = useState('');
+  const [commandMessage, setCommandMessage] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const submitBusy = useRef(false);
+  const retryActionId = useRef<string | null>(null);
   useFocusEffect(useCallback(() => {
     let active = true;
     setLoading(true);
@@ -24,12 +30,66 @@ export function HomeScreen() {
     return () => { active = false; };
   }, [expenses, attempt]));
 
+  async function submitCommand() {
+    if (submitBusy.current) return;
+    submitBusy.current = true;
+    setSubmitting(true);
+    setCommandMessage(null);
+    try {
+      const parsed = parseExpenseTextCommand(command, retryActionId.current ?? expenses.newActionId(), expenses.now());
+      if (parsed.status !== 'PARSED') {
+        setCommandMessage(parsed.message);
+        return;
+      }
+      retryActionId.current ??= parsed.proposal.actionId;
+      const { validation, outcome } = await expenses.save(parsed.proposal);
+      if (validation.status === 'NEEDS_CLARIFICATION') {
+        setCommandMessage(validation.clarifications.map(item => item.question).join('\n'));
+      } else if (validation.status === 'INVALID') {
+        setCommandMessage('입력 내용을 확인해 주세요.');
+      } else if (validation.status === 'REQUIRES_CONFIRMATION') {
+        setCommandMessage(validation.reason);
+      } else if (outcome?.result.status === 'SUCCESS') {
+        retryActionId.current = null;
+        setCommand('');
+        setAttempt(value => value + 1);
+      } else {
+        setCommandMessage('저장을 완료하지 못했습니다. 입력 내용을 확인하고 다시 시도해 주세요.');
+      }
+    } catch {
+      setCommandMessage('저장을 확인하지 못했습니다. 같은 입력으로 다시 시도해 주세요.');
+    } finally {
+      submitBusy.current = false;
+      setSubmitting(false);
+    }
+  }
+
   return <SafeAreaView style={styles.screen} edges={['left', 'right', 'bottom']}>
     <FlatList data={loading || error ? [] : items} keyExtractor={item => item.id}
       contentContainerStyle={styles.content}
       ListHeaderComponent={<View style={{ gap: 16 }}>
         <Text style={styles.title} accessibilityRole="header">나의 지출</Text>
         <ExpenseUndoFeedback onResult={() => setAttempt(value => value + 1)} />
+        <View style={styles.field}>
+          <Text style={styles.text}>무엇을 기록할까요?</Text>
+          <TextInput
+            accessibilityLabel="지출 문장 입력"
+            editable={!submitting}
+            maxLength={160}
+            onChangeText={value => { setCommand(value); setCommandMessage(null); retryActionId.current = null; }}
+            onSubmitEditing={submitCommand}
+            placeholder="예: 점심 7000원 썼어"
+            returnKeyType="done"
+            style={styles.input}
+            value={command}
+          />
+          <Pressable accessibilityRole="button" accessibilityState={{ disabled: submitting || !command.trim(), busy: submitting }}
+            disabled={submitting || !command.trim()} style={[styles.button, (submitting || !command.trim()) && styles.disabled]}
+            onPress={submitCommand}>
+            <Text style={styles.buttonText}>{submitting ? '기록 중…' : '기록'}</Text>
+          </Pressable>
+          {commandMessage && <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.error}>{commandMessage}</Text>}
+        </View>
         <Pressable accessibilityRole="button" style={styles.button} onPress={() => router.push('/manual-expense')}>
           <Text style={styles.buttonText}>+ 지출 직접 입력</Text>
         </Pressable>
