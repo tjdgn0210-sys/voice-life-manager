@@ -1,5 +1,5 @@
 import { useEffect, useState, type PropsWithChildren } from 'react';
-import { Button, StyleSheet, Text, View } from 'react-native';
+import { Button, Platform, StyleSheet, Text, View } from 'react-native';
 
 import { getDatabase } from './database';
 
@@ -12,8 +12,10 @@ export function DatabaseStartup({ children }: PropsWithChildren) {
     let active = true;
     getDatabase().then(
       () => { if (active) setStatus('READY'); },
-      () => {
-        console.error('Database initialization failed. App data access is blocked.');
+      (error: unknown) => {
+        const message = 'Database initialization failed. App data access is blocked.';
+        if (__DEV__ || Platform.OS === 'web') console.error(message, error);
+        else console.error(message);
         if (active) setStatus('FAILED');
       },
     );

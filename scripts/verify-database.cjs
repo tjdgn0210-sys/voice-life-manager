@@ -11,7 +11,7 @@ const ts = require('typescript');
 
 const root = path.resolve(__dirname, '..');
 
-function createLoader(expoStub) {
+function createLoader(expoStub, platformOS = 'ios') {
   const cache = new Map();
   function load(file) {
     file = path.resolve(file);
@@ -24,6 +24,7 @@ function createLoader(expoStub) {
     cache.set(file, mod);
     const localRequire = (specifier) => {
       if (specifier === 'expo-sqlite' && expoStub) return expoStub;
+      if (specifier === 'react-native') return { Platform: { OS: platformOS } };
       if (!specifier.startsWith('.')) throw new Error(`Unexpected runtime import: ${specifier}`);
       const resolved = path.resolve(path.dirname(file), specifier);
       return load(resolved + '.ts');
@@ -184,6 +185,47 @@ async function main() {
   assert.equal(connection.prepare('PRAGMA user_version').get().user_version, 1);
   connection.close();
   console.log('PASS: shared initializer promise, failed connection cleanup, explicit retry and successful connection reuse.');
+
+  let webConnection;
+  let activeWebTransaction = false;
+  let overlappingWebTransactions = false;
+  const loadWebWithStub = createLoader({ openDatabaseAsync: async () => {
+    const native = new DatabaseSync(':memory:');
+    webConnection = native;
+    const api = adapter(native);
+    api.getAllAsync = async sql => native.prepare(sql).all();
+    api.runAsync = async (sql, ...params) => native.prepare(sql).run(...params);
+    api.withTransactionAsync = async work => {
+      native.exec('BEGIN');
+      try { await work(); native.exec('COMMIT'); }
+      catch (error) { native.exec('ROLLBACK'); throw error; }
+    };
+    api.withExclusiveTransactionAsync = async () => {
+      throw new Error('Native exclusive transactions must not be used on web.');
+    };
+    return api;
+  } }, 'web');
+  const { getDatabase: getWebDatabase } = loadWebWithStub(path.join(root, 'src/database/database.ts'));
+  const webDatabase = await getWebDatabase();
+  assert.equal(webConnection.prepare('PRAGMA user_version').get().user_version, 1);
+  await Promise.all([
+    webDatabase.withExclusiveTransactionAsync(async () => {
+      assert.equal(activeWebTransaction, false);
+      activeWebTransaction = true;
+      await new Promise(resolve => setTimeout(resolve, 15));
+      activeWebTransaction = false;
+    }),
+    webDatabase.withExclusiveTransactionAsync(async () => {
+      overlappingWebTransactions ||= activeWebTransaction;
+      activeWebTransaction = true;
+      await new Promise(resolve => setTimeout(resolve, 5));
+      activeWebTransaction = false;
+    }),
+  ]);
+  assert.equal(overlappingWebTransactions, false);
+  assert.equal(activeWebTransaction, false);
+  webConnection.close();
+  console.log('PASS: web database startup uses supported transactions and serializes application transactions.');
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1; });
