@@ -122,7 +122,7 @@ async function main() {
       react: { useCallback: fn => fn, useRef: value => ({ current: value }), useState: value => {
         const index = homeStateIndex++;
         return [index === 4 ? homeCommand : typeof value === 'function' ? value() : value, () => {}];
-      } },
+      }, useEffect() {} },
       'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
       'expo-router': { router: { push() {} }, useFocusEffect() {} },
       'react-native': { ActivityIndicator: 'ActivityIndicator', FlatList: 'FlatList', Pressable: 'Pressable', Text: 'Text', TextInput: 'TextInput', View: 'View' },
@@ -131,6 +131,7 @@ async function main() {
       '../capture/expense-context': { useExpenses: () => expenses },
       '../capture/expense-styles': { expenseStyles: {} },
       '../../application/proposals/capture-parser-router': { createCaptureParserInput, routeCaptureInput },
+      '../capture/voice-capture-context': { useVoiceCapture: () => ({ start() {}, stop() {}, cancel() {} }) },
       './expense-undo-feedback': { ExpenseUndoFeedback: 'ExpenseUndoFeedback' },
     };
     const homeFile = path.join(root, 'src/features/home/home-screen.tsx');

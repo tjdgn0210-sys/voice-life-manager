@@ -34,7 +34,14 @@
         }
       ],
       "expo-sqlite",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "음성 입력을 위해 마이크 사용 권한이 필요합니다.",
+          "speechRecognitionPermission": "음성 입력을 위해 음성 인식 권한이 필요합니다."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

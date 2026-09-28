@@ -5,7 +5,7 @@ import type { ExpenseFeedback } from '../../application/expenses/manual-expenses
 import { useExpenses } from '../capture/expense-context';
 import { expenseStyles as styles } from '../capture/expense-styles';
 
-export function ExpenseUndoFeedback({ onResult }: { onResult(): void }) {
+export function ExpenseUndoFeedback({ onResult, refreshKey }: { onResult(): void; refreshKey: number }) {
   const expenses = useExpenses();
   const [feedback, setFeedback] = useState<ExpenseFeedback | null>(() => expenses.feedback());
   const [message, setMessage] = useState<string | null>(null);
@@ -19,7 +19,7 @@ export function ExpenseUndoFeedback({ onResult }: { onResult(): void }) {
     const subscription = AppState.addEventListener('change', update);
     const timer = setInterval(update, 250);
     return () => { clearInterval(timer); subscription.remove(); };
-  }, [expenses]));
+  }, [expenses, refreshKey]));
 
   async function reverse() {
     if (busy.current || !feedback || feedback.status !== 'SAVED') return;

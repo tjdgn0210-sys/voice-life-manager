@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { router, useFocusEffect } from 'expo-router';
 import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -7,9 +7,13 @@ import { useExpenses } from '../capture/expense-context';
 import { expenseStyles as styles } from '../capture/expense-styles';
 import { createCaptureParserInput, routeCaptureInput } from '../../application/proposals/capture-parser-router';
 import { ExpenseUndoFeedback } from './expense-undo-feedback';
+import { useVoiceCapture } from '../capture/voice-capture-context';
+import type { SpeechPermissionStatus } from '../../application/speech/speech-recognition-adapter';
+import type { VoiceCaptureState } from '../../application/capture/voice-expense-capture';
 
 export function HomeScreen() {
   const expenses = useExpenses();
+  const voiceCapture = useVoiceCapture();
   const [items, setItems] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -17,8 +21,13 @@ export function HomeScreen() {
   const [command, setCommand] = useState('');
   const [commandMessage, setCommandMessage] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [voiceState, setVoiceState] = useState<VoiceCaptureState>('IDLE');
+  const [voicePermission, setVoicePermission] = useState<SpeechPermissionStatus>('UNKNOWN');
+  const [partialTranscript, setPartialTranscript] = useState('');
+  const [voiceMessage, setVoiceMessage] = useState<string | null>(null);
   const submitBusy = useRef(false);
   const retryActionId = useRef<string | null>(null);
+  useEffect(() => () => voiceCapture.cancel(false), [voiceCapture]);
   useFocusEffect(useCallback(() => {
     let active = true;
     setLoading(true);
@@ -66,12 +75,22 @@ export function HomeScreen() {
     }
   }
 
+  function startVoiceCapture() {
+    void voiceCapture.start({
+      onState: setVoiceState,
+      onPermission: setVoicePermission,
+      onPartial: setPartialTranscript,
+      onMessage: message => setVoiceMessage(message || null),
+      onSaved: () => setAttempt(value => value + 1),
+    });
+  }
+
   return <SafeAreaView style={styles.screen} edges={['left', 'right', 'bottom']}>
     <FlatList data={loading || error ? [] : items} keyExtractor={item => item.id}
       contentContainerStyle={styles.content}
       ListHeaderComponent={<View style={{ gap: 16 }}>
         <Text style={styles.title} accessibilityRole="header">나의 지출</Text>
-        <ExpenseUndoFeedback onResult={() => setAttempt(value => value + 1)} />
+        <ExpenseUndoFeedback refreshKey={attempt} onResult={() => setAttempt(value => value + 1)} />
         <View style={styles.field}>
           <Text style={styles.text}>무엇을 기록할까요?</Text>
           <TextInput
@@ -91,6 +110,19 @@ export function HomeScreen() {
             <Text style={styles.buttonText}>{submitting ? '기록 중…' : '기록'}</Text>
           </Pressable>
           {commandMessage && <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.error}>{commandMessage}</Text>}
+        </View>
+        <View style={styles.field}>
+          <Pressable accessibilityRole="button"
+            accessibilityState={{ disabled: submitting || (voiceState !== 'IDLE' && voiceState !== 'LISTENING'), busy: voiceState === 'CHECKING' || voiceState === 'PROCESSING' }}
+            disabled={submitting || (voiceState !== 'IDLE' && voiceState !== 'LISTENING')}
+            style={[styles.button, (submitting || (voiceState !== 'IDLE' && voiceState !== 'LISTENING')) && styles.disabled]}
+            onPress={voiceState === 'LISTENING' ? () => voiceCapture.stop() : startVoiceCapture}>
+            <Text style={styles.buttonText}>{voiceState === 'LISTENING' ? '중지' : voiceState === 'CHECKING' ? '마이크 확인 중…' : voiceState === 'STOPPING' ? '음성 마무리 중…' : voiceState === 'PROCESSING' ? '기록 중…' : '🎤 말하기'}</Text>
+          </Pressable>
+          {voiceState === 'LISTENING' && <Text style={styles.muted}>듣고 있어요…</Text>}
+          {partialTranscript !== '' && <Text accessibilityLiveRegion="polite" style={styles.muted}>{partialTranscript}</Text>}
+          {voicePermission === 'DENIED' && !voiceMessage && <Text style={styles.muted}>마이크 권한이 거부되었습니다.</Text>}
+          {voiceMessage && <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.error}>{voiceMessage}</Text>}
         </View>
         <Pressable accessibilityRole="button" style={styles.button} onPress={() => router.push('/manual-expense')}>
           <Text style={styles.buttonText}>+ 지출 직접 입력</Text>
