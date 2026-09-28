@@ -190,6 +190,47 @@ async function main() {
     const immutableResult=await immutableWrite;
     assert.equal((await transactions.findById(immutableResult.result.affectedEntityId)).amount,8000);
     console.log('PASS: setup errors, stale validation rejection, input snapshot isolation and transaction-scoped repository reuse.');
+    const { createManualExpenses } = load('src/application/expenses/manual-expenses.ts');
+    const { initialExpenseForm, expenseProposal, localOccurrence } = load('src/features/capture/expense-form.ts');
+    const manual = createManualExpenses({ ...deps, transactions, nextActionId:nextId });
+    const form = { ...initialExpenseForm(timestamp), amount:'7000', date:'2020-01-02', time:'12:34' };
+    const manualProposal = expenseProposal(manual.newActionId(), form);
+    const manualSaved = await manual.save(manualProposal);
+    assert.equal(manualSaved.outcome.result.status,'SUCCESS');
+    assert(manualSaved.outcome.undoRecord);
+    const manualEntity = await transactions.findById(manualSaved.outcome.result.affectedEntityId);
+    assert.equal(manualEntity.amount,7000);
+    assert.equal(manualEntity.inputMethod,'MANUAL');
+    assert.equal(manualEntity.currencyCode,'KRW');
+    assert.equal(manualEntity.category,null);
+    assert.equal(manualEntity.memo,null);
+    assert.equal(new Date(manualEntity.occurredAt).getHours(),12);
+    assert.equal(new Date(manualEntity.occurredAt).getMinutes(),34);
+    assert((await manual.list()).some(item=>item.id===manualEntity.id));
+    assert((await manual.list()).every(item=>item.type==='EXPENSE'));
+    const manualCounts = counts();
+    await manual.save(manualProposal);
+    assert.equal(counts().transactions,manualCounts.transactions);
+    for (const amount of ['0','-1','1.5','7,000','1e3','words']) {
+      assert.equal((await manual.save(expenseProposal(nextId(), {...form,amount}))).validation.status,'INVALID');
+    }
+    assert.equal((await manual.save(expenseProposal(nextId(), {...form,amount:''}))).validation.status,'NEEDS_CLARIFICATION');
+    assert.equal((await manual.save(expenseProposal(nextId(), {...form,date:''}))).validation.status,'NEEDS_CLARIFICATION');
+    for (const [date,time] of [['2026-02-30','12:00'],['2026-09-28','25:00'],['2026/09/28','12:00']]) {
+      assert.equal(validateCreateTransaction(expenseProposal(nextId(), {...form,date,time})).status,'INVALID');
+    }
+    assert.equal(localOccurrence('2026-09-28',''),null);
+    // Exercise the outside-window branch with real SQLite rows and repository reads.
+    for (let i=0;i<101;i++) await transactions.create({...manualEntity,id:nextId(),occurredAt:timestamp});
+    assert(!(await transactions.listRecent(100)).some(item=>item.id===manualEntity.id));
+    assert.equal((await manual.list())[0].id,manualEntity.id);
+    const beforeManualFailure = counts();
+    rejectCommit = true;
+    assert.equal((await manual.save(expenseProposal(nextId(), form))).outcome.result.status,'FAILED');
+    rejectCommit = false;
+    assert.deepEqual(counts(),beforeManualFailure);
+    assert.equal((await manual.list())[0].id,manualEntity.id);
+    console.log('PASS: manual form -> validator -> atomic executor -> repository list, stable retry, invalid input, local date conversion, backdated refresh and failed-save state.');
   } finally {db.close();}
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

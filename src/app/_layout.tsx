@@ -1,20 +1,26 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
+import { DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { useColorScheme } from 'react-native';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
-import AppTabs from '@/components/app-tabs';
+import { ExpenseProvider } from '@/composition/expense-provider';
 import { DatabaseStartup } from '@/database/database-startup';
 
 SplashScreen.preventAutoHideAsync();
 
-export default function TabLayout() {
-  const colorScheme = useColorScheme();
+export default function RootLayout() {
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+    <ThemeProvider value={DefaultTheme}>
       <AnimatedSplashOverlay />
       <DatabaseStartup>
-        <AppTabs />
+        <ExpenseProvider>
+          <Stack>
+            <Stack.Screen name="index" options={{ title: 'Voice Life Manager' }} />
+            <Stack.Screen name="manual-expense" options={{ title: '지출 직접 입력' }} />
+            <Stack.Protected guard={false}>
+              <Stack.Screen name="explore" />
+            </Stack.Protected>
+          </Stack>
+        </ExpenseProvider>
       </DatabaseStartup>
     </ThemeProvider>
   );
