@@ -2,12 +2,15 @@ import type { CreateTransactionProposal } from '../../application/validator/vali
 
 export interface ExpenseForm { amount: string; category: string; memo: string; date: string; time: string }
 
-export function initialExpenseForm(timestamp: string): ExpenseForm {
+export function localDateTimeFields(timestamp: string): Pick<ExpenseForm, 'date' | 'time'> {
   const local = new Date(timestamp);
   const pad = (value: number) => String(value).padStart(2, '0');
-  return { amount: '', category: '', memo: '',
-    date: `${local.getFullYear()}-${pad(local.getMonth() + 1)}-${pad(local.getDate())}`,
+  return { date: `${local.getFullYear()}-${pad(local.getMonth() + 1)}-${pad(local.getDate())}`,
     time: `${pad(local.getHours())}:${pad(local.getMinutes())}` };
+}
+
+export function initialExpenseForm(timestamp: string): ExpenseForm {
+  return { amount: '', category: '', memo: '', ...localDateTimeFields(timestamp) };
 }
 
 /** Presentation conversion only. Reject overflow rather than silently normalizing dates. */

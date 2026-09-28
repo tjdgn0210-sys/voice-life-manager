@@ -191,9 +191,22 @@ async function main() {
     assert.equal((await transactions.findById(immutableResult.result.affectedEntityId)).amount,8000);
     console.log('PASS: setup errors, stale validation rejection, input snapshot isolation and transaction-scoped repository reuse.');
     const { createManualExpenses } = load('src/application/expenses/manual-expenses.ts');
-    const { initialExpenseForm, expenseProposal, localOccurrence } = load('src/features/capture/expense-form.ts');
+    const { initialExpenseForm, localDateTimeFields, expenseProposal, localOccurrence } = load('src/features/capture/expense-form.ts');
     const manual = createManualExpenses({ ...deps, transactions, nextActionId:nextId });
     const form = { ...initialExpenseForm(timestamp), amount:'7000', date:'2020-01-02', time:'12:34' };
+    assert.deepEqual(localDateTimeFields(timestamp), {date:initialExpenseForm(timestamp).date,time:initialExpenseForm(timestamp).time});
+    const chosenLocal = new Date(2026, 8, 15, 9, 42);
+    const chosenFields = localDateTimeFields(chosenLocal.toISOString());
+    assert.equal(chosenFields.date, '2026-09-15');
+    assert.equal(chosenFields.time, '09:42');
+    assert.equal(localOccurrence(chosenFields.date, chosenFields.time), chosenLocal.toISOString());
+    // On the project machine (Korea Standard Time), verify wall-clock selection
+    // becomes the corresponding UTC instant without changing the DB contract.
+    if (Intl.DateTimeFormat().resolvedOptions().timeZone === 'Asia/Seoul') {
+      assert.equal(localOccurrence('2026-09-15', '09:42'), '2026-09-15T00:42:00.000Z');
+    }
+    assert.equal(localDateTimeFields('2026-09-28T02:00:00.000Z').time,
+      `${String(new Date(timestamp).getHours()).padStart(2, '0')}:${String(new Date(timestamp).getMinutes()).padStart(2, '0')}`);
     const manualProposal = expenseProposal(manual.newActionId(), form);
     const manualSaved = await manual.save(manualProposal);
     assert.equal(manualSaved.outcome.result.status,'SUCCESS');
