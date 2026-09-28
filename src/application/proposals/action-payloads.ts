@@ -61,6 +61,11 @@ export interface TargetPayload {
   targetId: EntityId | null;
 }
 
+/** Links a creation reversal to its original evidence; not a generic delete authorization. */
+export interface DeleteTransactionPayload extends TargetPayload {
+  undoOf?: { undoId: EntityId; actionId: EntityId };
+}
+
 export interface CompletePayload extends TargetPayload {
   completedAt: ISODateTime | null;
 }
@@ -68,7 +73,7 @@ export interface CompletePayload extends TargetPayload {
 export interface ActionPayloadMap {
   CREATE_TRANSACTION: CreateTransactionPayload;
   UPDATE_TRANSACTION: UpdatePayload<CreateTransactionPayload>;
-  DELETE_TRANSACTION: TargetPayload;
+  DELETE_TRANSACTION: DeleteTransactionPayload;
   CREATE_TASK: CreateTaskPayload;
   UPDATE_TASK: UpdatePayload<CreateTaskPayload & { status: TaskStatus; completedAt: ISODateTime | null }>;
   COMPLETE_TASK: CompletePayload;

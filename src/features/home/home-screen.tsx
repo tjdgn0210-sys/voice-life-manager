@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import type { Transaction } from '../../domain/transaction/transaction';
 import { useExpenses } from '../capture/expense-context';
 import { expenseStyles as styles } from '../capture/expense-styles';
+import { ExpenseUndoFeedback } from './expense-undo-feedback';
 
 export function HomeScreen() {
   const expenses = useExpenses();
@@ -28,6 +29,7 @@ export function HomeScreen() {
       contentContainerStyle={styles.content}
       ListHeaderComponent={<View style={{ gap: 16 }}>
         <Text style={styles.title} accessibilityRole="header">나의 지출</Text>
+        <ExpenseUndoFeedback onResult={() => setAttempt(value => value + 1)} />
         <Pressable accessibilityRole="button" style={styles.button} onPress={() => router.push('/manual-expense')}>
           <Text style={styles.buttonText}>+ 지출 직접 입력</Text>
         </Pressable>

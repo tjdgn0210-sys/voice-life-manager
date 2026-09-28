@@ -17,7 +17,7 @@ export function createSqliteTransactionCreationUnitOfWork(
         const transactions = createSqliteTransactionRepository(transaction);
         const actionLogs = createSqliteActionLogRepository(transaction);
         result = await work({
-          transactions: { findById: transactions.findById, create: transactions.create },
+          transactions: { findById: transactions.findById, create: transactions.create, softDelete: transactions.softDelete },
           actionLogs: { append: actionLogs.append },
         });
       });

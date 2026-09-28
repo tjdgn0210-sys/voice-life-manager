@@ -231,6 +231,126 @@ async function main() {
     assert.deepEqual(counts(),beforeManualFailure);
     assert.equal((await manual.list())[0].id,manualEntity.id);
     console.log('PASS: manual form -> validator -> atomic executor -> repository list, stable retry, invalid input, local date conversion, backdated refresh and failed-save state.');
+    const { createTransactionUndo } = load('src/application/undo/undo-created-transaction.ts');
+    let undoNow = timestamp;
+    const undoDeps = {...deps,transactions,nextActionId:nextId,now:()=>undoNow};
+    const undoExecutor = createTransactionUndo(undoDeps);
+    // Create through the same facade used by the screens, with an injectable clock.
+    const undoSession = createManualExpenses(undoDeps);
+    async function newUndoTarget() {
+      undoNow = timestamp;
+      const value = await undoSession.save(expenseProposal(nextId(),form));
+      assert.equal(value.outcome.result.status,'SUCCESS');
+      return value.outcome.undoRecord;
+    }
+    const record = await newUndoTarget();
+    const originalLog = (await actionLogs.findRecent(1000)).find(log=>log.proposal.actionId===record.actionId);
+    const beforeUndo = counts();
+    undoNow = '2026-09-28T02:00:30.000Z';
+    assert.equal((await undoSession.undo(record.undoId)).status,'SUCCESS');
+    assert.equal(await transactions.findById(record.affectedEntityId),null);
+    assert(!(await undoSession.list()).some(item=>item.id===record.affectedEntityId));
+    assert.equal(db.prepare('SELECT deleted_at FROM transactions WHERE id=?').get(record.affectedEntityId).deleted_at,undoNow);
+    assert.deepEqual(counts(),{transactions:beforeUndo.transactions,logs:beforeUndo.logs+1});
+    const undoLog = (await actionLogs.findRecent(1000)).find(log=>log.proposal.payload.undoOf?.undoId===record.undoId);
+    assert.equal(undoLog.proposal.type,'DELETE_TRANSACTION');
+    assert.equal(undoLog.proposal.payload.undoOf.actionId,record.actionId);
+    assert.equal(undoLog.executionResult.status,'SUCCESS');
+    assert.notEqual(undoLog.proposal.actionId,record.actionId);
+    assert.deepEqual((await actionLogs.findRecent(1000)).find(log=>log.id===originalLog.id),originalLog);
+    assert.equal(undoSession.feedback().status,'UNDONE');
+    assert.equal((await undoExecutor(record)).status,'UNAVAILABLE');
+    assert.equal((await undoSession.undo(record.undoId)).status,'UNAVAILABLE');
+    assert.equal((await undoExecutor(null)).status,'UNAVAILABLE');
+    assert.equal((await undoExecutor({...record,actionType:'CREATE_TASK'})).status,'INELIGIBLE');
+
+    const expiredRecord = await newUndoTarget();
+    const beforeExpired = counts();
+    undoNow = '2026-09-28T02:01:00.001Z';
+    assert.equal((await undoExecutor(expiredRecord)).status,'EXPIRED');
+    assert.equal(undoSession.feedback().status,'EXPIRED');
+    assert.deepEqual(counts(),beforeExpired);
+    assert(await transactions.findById(expiredRecord.affectedEntityId));
+    const boundaryRecord = await newUndoTarget();
+    undoNow = boundaryRecord.reversibleUntil;
+    assert.equal((await undoExecutor(boundaryRecord)).status,'SUCCESS');
+    const changedRecord = await newUndoTarget();
+    const changedEntity = await transactions.findById(changedRecord.affectedEntityId);
+    await transactions.update({...changedEntity,memo:'edited',updatedAt:'2026-09-28T02:00:01.000Z'});
+    assert.equal((await undoExecutor(changedRecord)).status,'INELIGIBLE');
+    assert(await transactions.findById(changedRecord.affectedEntityId));
+    const missingAction = nextId();
+    assert.equal((await undoExecutor({...record,actionId:missingAction,affectedEntityId:idsForAction(missingAction).transactionId})).status,'UNAVAILABLE');
+
+    const rollbackRecord = await newUndoTarget();
+    const beforeUndoFailure = counts();
+    for (const trigger of [
+      "CREATE TRIGGER test_undo_failure BEFORE UPDATE ON transactions BEGIN SELECT RAISE(ABORT,'delete failed'); END",
+      "CREATE TRIGGER test_undo_failure BEFORE INSERT ON action_logs BEGIN SELECT RAISE(ABORT,'log failed'); END",
+    ]) {
+      db.exec(trigger);
+      assert.equal((await undoExecutor(rollbackRecord)).status,'FAILED');
+      db.exec('DROP TRIGGER test_undo_failure');
+      assert(await transactions.findById(rollbackRecord.affectedEntityId));
+      assert.deepEqual(counts(),beforeUndoFailure);
+    }
+    rejectCommit = true;
+    assert.equal((await undoExecutor(rollbackRecord)).status,'FAILED');
+    rejectCommit = false;
+    assert(await transactions.findById(rollbackRecord.affectedEntityId));
+    assert.deepEqual(counts(),beforeUndoFailure);
+    const delayedExpiry = createTransactionUndo({...undoDeps,unitOfWork:{run:work=>unitOfWork.run(repositories=>work({
+      ...repositories,transactions:{...repositories.transactions,findById:async id=>{
+        const value=await repositories.transactions.findById(id);
+        undoNow='2026-09-28T02:01:00.001Z';
+        return value;
+      }},
+    }))}});
+    assert.equal((await delayedExpiry(rollbackRecord)).status,'EXPIRED');
+    assert(await transactions.findById(rollbackRecord.affectedEntityId));
+    assert.deepEqual(counts(),beforeUndoFailure);
+    undoNow=timestamp;
+    const concurrent = await Promise.all([undoExecutor(rollbackRecord),undoExecutor(rollbackRecord)]);
+    assert.deepEqual(concurrent.map(value=>value.status),['SUCCESS','BUSY']);
+    assert.equal(counts().logs,beforeUndoFailure.logs+1);
+    assert.equal(createManualExpenses(undoDeps).feedback(),null); // Restart has no Undo evidence.
+    console.log('PASS: Undo soft deletion, separate linked evidence, expiry/boundary, missing/modified/duplicate targets, session reset and mutation/log/commit rollback.');
+
+    // Invoke the actual UI button callback twice before a React rerender. Stub only
+    // rendering/hooks/native surfaces; the application and SQLite remain real.
+    const uiRecord = await newUndoTarget();
+    const jsx = (type,props) => ({type,props});
+    const mocks = {
+      react: {useCallback:fn=>fn,useRef:value=>({current:value}),useState:value=>[typeof value==='function'?value():value,()=>{}]},
+      'react/jsx-runtime': {jsx,jsxs:jsx,Fragment:'Fragment'},
+      'expo-router': {useFocusEffect:()=>{}},
+      'react-native': {AppState:{},Pressable:'Pressable',Text:'Text',View:'View'},
+      '../capture/expense-context': {useExpenses:()=>undoSession},
+      '../capture/expense-styles': {expenseStyles:{}},
+    };
+    const uiFile = path.join(root,'src/features/home/expense-undo-feedback.tsx');
+    const uiCode = ts.transpileModule(fs.readFileSync(uiFile,'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
+    const uiModule = {exports:{}};
+    vm.runInThisContext(`(function(require,module,exports){${uiCode}\n})`)(name=>{assert(name in mocks,name);return mocks[name];},uiModule,uiModule.exports);
+    let refreshes = 0;
+    const tree = uiModule.exports.ExpenseUndoFeedback({onResult:()=>refreshes++});
+    function button(node) {
+      if (!node || typeof node!=='object') return null;
+      if (node.type==='Pressable') return node;
+      for (const child of [node.props?.children].flat(Infinity)) {const match=button(child);if(match)return match;}
+      return null;
+    }
+    const press = button(tree).props.onPress;
+    const beforeTaps = counts();
+    await Promise.all([press(),press()]);
+    assert.equal(refreshes,1);
+    assert.equal(counts().logs,beforeTaps.logs+1);
+    assert.equal(await transactions.findById(uiRecord.affectedEntityId),null);
+    assert.equal(button(uiModule.exports.ExpenseUndoFeedback({onResult:()=>{}})),null);
+    await newUndoTarget();
+    undoNow = '2026-09-28T02:01:01.000Z';
+    assert.equal(button(uiModule.exports.ExpenseUndoFeedback({onResult:()=>{}})),null);
+    console.log('PASS: actual Undo button handler rejects rapid duplicate taps, refreshes once, and renders no Undo button after success/expiry.');
   } finally {db.close();}
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

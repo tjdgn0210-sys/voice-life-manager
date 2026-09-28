@@ -5,7 +5,7 @@ import { getDatabase } from '../database/database';
 import { createSqliteTransactionRepository } from '../database/repositories/sqlite-transaction-repository';
 import { createSqliteTransactionCreationUnitOfWork } from '../database/sqlite-transaction-creation-unit-of-work';
 
-// Initial evidence policy for this slice. No Undo persistence or UI is enabled.
+// Session-only Undo policy. No persistent Undo table; restarting loses the opportunity.
 const UNDO_WINDOW_MILLISECONDS = 60_000;
 
 export async function initializeManualExpenses() {

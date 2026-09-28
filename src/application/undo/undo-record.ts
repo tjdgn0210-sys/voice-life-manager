@@ -15,7 +15,7 @@ export interface UndoRecord {
   actionId: EntityId;
   actionType: ActionType;
   affectedEntityId: EntityId;
-  /** Explicit deadline; the product's Undo duration remains to be decided. */
+  /** Explicit deadline; manual expense composition currently supplies a 60-second window. */
   reversibleUntil: ISODateTime;
   /** Action-specific inverse data, e.g. prior values of only changed fields.
    * For creation, the action type and affectedEntityId may suffice (empty object).

@@ -1,9 +1,9 @@
 import type { TransactionRepository } from '../../domain/transaction/transaction-repository';
 import type { ActionLogRepository } from './action-log-repository';
 
-/** Only the repository operations required by CREATE_TRANSACTION, scoped to one atomic write. */
+/** Creation and its narrowly scoped Undo, scoped to one atomic write. */
 export interface TransactionCreationRepositories {
-  transactions: Pick<TransactionRepository, 'findById' | 'create'>;
+  transactions: Pick<TransactionRepository, 'findById' | 'create' | 'softDelete'>;
   actionLogs: Pick<ActionLogRepository, 'append'>;
 }
 
