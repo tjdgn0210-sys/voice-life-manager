@@ -20,11 +20,6 @@ export type CaptureParserResult =
   | { status: 'AI_REQUIRED'; message: string }
   | { status: 'UNSUPPORTED'; message: string };
 
-/** Contract for a future interpreter. No implementation or provider is wired in this phase. */
-export interface CaptureFallbackParser {
-  parse(input: CaptureParserInput): Promise<CaptureParserResult>;
-}
-
 const aiRequiredMessage = '이 문장은 조금 더 복잡해서 아직 자동 처리할 수 없어요.';
 const unsupportedMessage = '이 요청은 아직 지원하지 않아요.';
 
